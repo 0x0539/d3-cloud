@@ -1,4 +1,4 @@
-// Modified d3-cloud library with incremental placement support
+// Modified d3-cloud library with incremental placement and dead zone support
 // Word cloud layout by Jason Davies, https://www.jasondavies.com/wordcloud/
 // Algorithm due to Jonathan Feinberg, https://s3.amazonaws.com/static.mrfeinberg.com/bv_ch03.pdf
 
@@ -34,7 +34,9 @@ module.exports = function() {
       // Store persistent state for incremental updates
       board = null,
       bounds = null,
-      existingTags = [];
+      existingTags = [],
+      // Dead zones where words should not be placed
+      deadZones = [];
 
   cloud.canvas = function(_) {
     return arguments.length ? (canvas = functor(_), cloud) : canvas;
@@ -118,6 +120,28 @@ module.exports = function() {
     return cloud;
   };
 
+  // New method to add dead zones
+  cloud.addDeadZone = function(x, y, width, height) {
+    deadZones.push({
+      x1: x,
+      y1: y,
+      x2: x + width,
+      y2: y + height
+    });
+    return cloud;
+  };
+
+  // New method to clear all dead zones
+  cloud.clearDeadZones = function() {
+    deadZones = [];
+    return cloud;
+  };
+
+  // New method to get all dead zones
+  cloud.getDeadZones = function() {
+    return deadZones.slice();
+  };
+
   function getContext(canvas) {
     const context = canvas.getContext("2d", {willReadFrequently: true});
 
@@ -129,6 +153,46 @@ module.exports = function() {
     context.fillStyle = context.strokeStyle = "red";
 
     return {context, ratio};
+  }
+
+  // Check if a tag overlaps with any dead zone
+  function intersectsDeadZone(tag) {
+    // Calculate the actual tag bounds with rotation considered
+    var tagLeft = tag.x + tag.x0;
+    var tagRight = tag.x + tag.x1;
+    var tagTop = tag.y + tag.y0;
+    var tagBottom = tag.y + tag.y1;
+
+    // If tag is rotated, we use a more conservative bounding box
+    // This isn't perfect for rotated text but works as a first approximation
+    if (tag.rotate) {
+      // Expand the bounding box to account for rotation
+      var diagonal = Math.sqrt(
+        Math.pow(tagRight - tagLeft, 2) + 
+        Math.pow(tagBottom - tagTop, 2)
+      ) / 2;
+      
+      var centerX = (tagLeft + tagRight) / 2;
+      var centerY = (tagTop + tagBottom) / 2;
+      
+      tagLeft = centerX - diagonal;
+      tagRight = centerX + diagonal;
+      tagTop = centerY - diagonal;
+      tagBottom = centerY + diagonal;
+    }
+
+    // Check against each dead zone
+    for (var i = 0; i < deadZones.length; i++) {
+      var zone = deadZones[i];
+      
+      // Standard rectangle intersection test
+      if (!(tagRight < zone.x1 || tagLeft > zone.x2 || 
+            tagBottom < zone.y1 || tagTop > zone.y2)) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   function place(board, tag, bounds) {
@@ -154,6 +218,10 @@ module.exports = function() {
 
       if (tag.x + tag.x0 < 0 || tag.y + tag.y0 < 0 ||
           tag.x + tag.x1 > size[0] || tag.y + tag.y1 > size[1]) continue;
+      
+      // Check if the tag intersects with any dead zone
+      if (intersectsDeadZone(tag)) continue;
+      
       // TODO only check for collisions within current bounds.
       if (!bounds || collideRects(tag, bounds)) {
         if (!cloudCollide(tag, board, size[0])) {
