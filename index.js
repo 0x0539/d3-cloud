@@ -1,3 +1,4 @@
+// Modified d3-cloud library with incremental placement support
 // Word cloud layout by Jason Davies, https://www.jasondavies.com/wordcloud/
 // Algorithm due to Jonathan Feinberg, https://s3.amazonaws.com/static.mrfeinberg.com/bv_ch03.pdf
 
@@ -29,29 +30,44 @@ module.exports = function() {
       timer = null,
       random = Math.random,
       cloud = {},
-      canvas = cloudCanvas;
+      canvas = cloudCanvas,
+      // Store persistent state for incremental updates
+      board = null,
+      bounds = null,
+      existingTags = [];
 
   cloud.canvas = function(_) {
     return arguments.length ? (canvas = functor(_), cloud) : canvas;
   };
 
-  cloud.start = function() {
-    var contextAndRatio = getContext(canvas()),
-        board = zeroArray((size[0] >> 5) * size[1]),
-        bounds = null,
-        n = words.length,
+  cloud.start = function(incremental) {
+    var contextAndRatio = getContext(canvas());
+    
+    // Initialize or reuse the board
+    if (!incremental || board === null) {
+      board = zeroArray((size[0] >> 5) * size[1]);
+      bounds = null;
+      existingTags = [];
+    }
+    
+    var n = words.length,
         i = -1,
-        tags = [],
-        data = words.map(function(d, i) {
-          d.text = text.call(this, d, i);
-          d.font = font.call(this, d, i);
-          d.style = fontStyle.call(this, d, i);
-          d.weight = fontWeight.call(this, d, i);
-          d.rotate = rotate.call(this, d, i);
-          d.size = ~~fontSize.call(this, d, i);
-          d.padding = padding.call(this, d, i);
-          return d;
-        }).sort(function(a, b) { return b.size - a.size; });
+        tags = incremental ? existingTags.slice() : [],
+        newWords = incremental ? 
+          words.filter(word => !existingTags.some(tag => tag.text === word.text)) : 
+          words.slice();
+    
+    // Process all words (both existing and new)
+    var data = newWords.map(function(d, i) {
+      d.text = text.call(this, d, i);
+      d.font = font.call(this, d, i);
+      d.style = fontStyle.call(this, d, i);
+      d.weight = fontWeight.call(this, d, i);
+      d.rotate = rotate.call(this, d, i);
+      d.size = ~~fontSize.call(this, d, i);
+      d.padding = padding.call(this, d, i);
+      return d;
+    }).sort(function(a, b) { return b.size - a.size; });
 
     if (timer) clearInterval(timer);
     timer = setInterval(step, 0);
@@ -61,7 +77,7 @@ module.exports = function() {
 
     function step() {
       var start = Date.now();
-      while (Date.now() - start < timeInterval && ++i < n && timer) {
+      while (Date.now() - start < timeInterval && ++i < data.length && timer) {
         var d = data[i];
         d.x = (size[0] * (random() + .5)) >> 1;
         d.y = (size[1] * (random() + .5)) >> 1;
@@ -76,21 +92,29 @@ module.exports = function() {
           d.y -= size[1] >> 1;
         }
       }
-      if (i >= n) {
+      if (i >= data.length) {
+        // Save the current state for future incremental updates
+        existingTags = tags.slice();
+        
         cloud.stop();
         event.call("end", cloud, tags, bounds);
       }
     }
-  }
+  };
 
   cloud.stop = function() {
     if (timer) {
       clearInterval(timer);
       timer = null;
     }
-    for (const d of words) {
-      delete d.sprite;
-    }
+    return cloud;
+  };
+
+  // New method to clear all state and start fresh
+  cloud.reset = function() {
+    board = null;
+    bounds = null;
+    existingTags = [];
     return cloud;
   };
 
@@ -164,6 +188,20 @@ module.exports = function() {
     return arguments.length ? (words = _, cloud) : words;
   };
 
+  // New method to add words (for incremental updates)
+  cloud.addWords = function(_) {
+    if (!arguments.length) return cloud;
+    
+    // Add new words to the existing array
+    if (Array.isArray(_)) {
+      words = words.concat(_);
+    } else {
+      words.push(_);
+    }
+    
+    return cloud;
+  };
+
   cloud.size = function(_) {
     return arguments.length ? (size = [+_[0], +_[1]], cloud) : size;
   };
@@ -207,6 +245,11 @@ module.exports = function() {
   cloud.on = function() {
     var value = event.on.apply(event, arguments);
     return value === event ? cloud : value;
+  };
+
+  // New method to get the current tags
+  cloud.tags = function() {
+    return existingTags.slice();
   };
 
   return cloud;
