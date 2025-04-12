@@ -10,6 +10,7 @@
     "canvas"
   ],
   "homepage": "https://www.jasondavies.com/wordcloud/",
+  "types": "index.d.ts",
   "license": "BSD-3-Clause",
   "author": {
     "name": "Jason Davies",
